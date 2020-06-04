@@ -16,7 +16,6 @@
 #include <opencv2/videoio.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/photo.hpp>
-#include <opencv2/opencv.hpp>
 #include <spdlog/spdlog.h>
 #include <popl.hpp>
 
@@ -70,7 +69,7 @@ void nlmf(cv::Mat frame, const float h, const float hColor, const int templateWi
 void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
                    const std::string& vocab_file_path, const std::string& video_file_path, const std::string& mask_img_path,
                    const unsigned int frame_skip, const bool no_sleep, const bool auto_term,
-                   const bool eval_log, const std::string& map_db_path) {
+                   const bool eval_log, const std::string& map_db_path, const int process_option) {
     // load the mask image
     const cv::Mat mask = mask_img_path.empty() ? cv::Mat{} : cv::imread(mask_img_path, cv::IMREAD_GRAYSCALE);
 
@@ -106,13 +105,15 @@ void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
             if (!frame.empty() && (num_frame % frame_skip == 0)) {
                 // input the current frame and estimate the camera pose
 
-                // gamma_correction(frame,2.0);
-                // bilateralFilter(frame,15,20,20);
-                // CLAHE(frame,2.0,7);
-                // bilateralFilter(frame,15,20,20);
-
-                CLAHE(frame,2.0,7);
-                nlmf(frame,10,10,7,21);
+                if (process_option == 1) {
+                    gamma_correction(frame,2.0);
+                    bilateralFilter(frame,15,20,20);
+                    CLAHE(frame,2.0,7);
+                    bilateralFilter(frame,15,20,20);
+                } else if (process_option == 2) {
+                    CLAHE(frame,2.0,7);
+                    nlmf(frame,10,10,7,21);
+                }
 
                 SLAM.feed_monocular_frame(frame, timestamp, mask);
             }
@@ -214,6 +215,7 @@ int main(int argc, char* argv[]) {
     auto debug_mode = op.add<popl::Switch>("", "debug", "debug mode");
     auto eval_log = op.add<popl::Switch>("", "eval-log", "store trajectory and tracking times for evaluation");
     auto map_db_path = op.add<popl::Value<std::string>>("p", "map-db", "store a map database at this path after SLAM", "");
+    auto process_option = op.add<popl::Value<unsigned int>>("", "proc-opt", "process option", 0);
     try {
         op.parse(argc, argv);
     }
@@ -263,7 +265,7 @@ int main(int argc, char* argv[]) {
     if (cfg->camera_->setup_type_ == openvslam::camera::setup_type_t::Monocular) {
         mono_tracking(cfg, vocab_file_path->value(), video_file_path->value(), mask_img_path->value(),
                       frame_skip->value(), no_sleep->is_set(), auto_term->is_set(),
-                      eval_log->is_set(), map_db_path->value());
+                      eval_log->is_set(), map_db_path->value(), process_option->value());
     }
     else {
         throw std::runtime_error("Invalid setup type: " + cfg->camera_->get_setup_type_string());
