@@ -100,6 +100,7 @@ foreach(EXECUTABLE_TARGET IN LISTS EXECUTABLE_TARGETS)
                           PRIVATE
                           ${PROJECT_NAME}
                           opencv_imgcodecs
+                          opencv_photo
                           opencv_videoio)
 
     # include popl and spdlog headers

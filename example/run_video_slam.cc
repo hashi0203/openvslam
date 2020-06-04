@@ -14,6 +14,9 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/videoio.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/photo.hpp>
+#include <opencv2/opencv.hpp>
 #include <spdlog/spdlog.h>
 #include <popl.hpp>
 
@@ -24,6 +27,45 @@
 #ifdef USE_GOOGLE_PERFTOOLS
 #include <gperftools/profiler.h>
 #endif
+
+void gamma_correction(cv::Mat frame, const int gamma) {
+    cv::Mat LookUpTable(1,256,CV_8UC1);
+    uchar* p = LookUpTable.data;
+    for(int i = 0; i < 256; i++) {
+        p[i] = (int)(pow((double)i / 255.0, 1.0 / gamma) * 255.0);
+    }
+    cv::LUT(frame,LookUpTable,frame);
+}
+
+void CLAHE(cv::Mat frame, const float clipLimit, const int tileGridSize) {
+    cv::cvtColor(frame,frame,CV_BGR2HSV);
+
+    std::vector<cv::Mat> flame_planes(3);
+    cv::split(frame,flame_planes);
+    
+    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
+    clahe->setClipLimit(clipLimit);
+    clahe->setTilesGridSize(cv::Size(tileGridSize,tileGridSize));
+    cv::Mat dst;
+    clahe->apply(flame_planes[2],dst);
+    
+    dst.copyTo(flame_planes[2]);
+    cv::merge(flame_planes,frame);
+
+    cv::cvtColor(frame,frame,CV_HSV2BGR);
+}
+
+void bilateralFilter(cv::Mat frame, const int d, const int sigmaColor, const int sigmaSpace) {
+    cv::Mat dst;
+    cv::bilateralFilter(frame,dst,d,sigmaColor,sigmaSpace,cv::BORDER_DEFAULT);
+    frame = dst;
+}
+
+void nlmf(cv::Mat frame, const float h, const float hColor, const int templateWindowSize, const int searchWindowSize) {
+    cv::Mat dst;
+    cv::fastNlMeansDenoisingColored(frame,dst,h,hColor,templateWindowSize,searchWindowSize);
+    frame = dst;
+}
 
 void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
                    const std::string& vocab_file_path, const std::string& video_file_path, const std::string& mask_img_path,
@@ -63,6 +105,15 @@ void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
 
             if (!frame.empty() && (num_frame % frame_skip == 0)) {
                 // input the current frame and estimate the camera pose
+
+                // gamma_correction(frame,2.0);
+                // bilateralFilter(frame,15,20,20);
+                // CLAHE(frame,2.0,7);
+                // bilateralFilter(frame,15,20,20);
+
+                CLAHE(frame,2.0,7);
+                nlmf(frame,10,10,7,21);
+
                 SLAM.feed_monocular_frame(frame, timestamp, mask);
             }
 
