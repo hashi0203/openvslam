@@ -41,7 +41,7 @@ cmake-build-release/
 *.app
 
 # Custom
-video_correction/
+video_correction/*
 !video_correction/.ipynb_checkpoints
 !video_correction/correct.ipynb
 !video_correction/faster.ipynb
