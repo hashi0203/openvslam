@@ -66,6 +66,11 @@ void nlmf(cv::Mat frame, const float h, const float hColor, const int templateWi
     frame = dst;
 }
 
+void filter2D(cv::Mat frame) {
+    cv::Mat kernel = (cv::Mat_<int>(3,3) << 0,-1,0,-1,5,-1,0,-1,0);
+    cv::filter2D(frame, frame, -1, kernel, cv::Point(-1, -1), 0, cv::BORDER_DEFAULT);
+}
+
 void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
                    const std::string& vocab_file_path, const std::string& video_file_path, const std::string& mask_img_path,
                    const unsigned int frame_skip, const bool no_sleep, const bool auto_term,
@@ -113,6 +118,8 @@ void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
                 } else if (process_option == 2) {
                     CLAHE(frame,2.0,7);
                     nlmf(frame,10,10,7,21);
+                } else if (process_option == 3) {
+                    filter2D(frame);
                 }
 
                 SLAM.feed_monocular_frame(frame, timestamp, mask);
