@@ -11,8 +11,6 @@ opt=0
 if [ $# -gt 1 ]; then
   expr $2 + 1 > /dev/null 2>&1
   RET1=$?
-  echo "戻り値 : $2"
-  echo "戻り値 : $RET1"
   if [ $RET1 -lt 2 ]; then
     opt=${2}
   else
