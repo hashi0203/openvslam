@@ -14,6 +14,8 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/videoio.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/photo.hpp>
 #include <spdlog/spdlog.h>
 #include <popl.hpp>
 
@@ -25,10 +27,54 @@
 #include <gperftools/profiler.h>
 #endif
 
+void gamma_correction(cv::Mat frame, const int gamma) {
+    cv::Mat LookUpTable(1,256,CV_8UC1);
+    uchar* p = LookUpTable.data;
+    for(int i = 0; i < 256; i++) {
+        p[i] = (int)(pow((double)i / 255.0, 1.0 / gamma) * 255.0);
+    }
+    cv::LUT(frame,LookUpTable,frame);
+}
+
+void CLAHE(cv::Mat frame, const float clipLimit, const int tileGridSize) {
+    cv::cvtColor(frame,frame,CV_BGR2HSV);
+
+    std::vector<cv::Mat> flame_planes(3);
+    cv::split(frame,flame_planes);
+    
+    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
+    clahe->setClipLimit(clipLimit);
+    clahe->setTilesGridSize(cv::Size(tileGridSize,tileGridSize));
+    cv::Mat dst;
+    clahe->apply(flame_planes[2],dst);
+    
+    dst.copyTo(flame_planes[2]);
+    cv::merge(flame_planes,frame);
+
+    cv::cvtColor(frame,frame,CV_HSV2BGR);
+}
+
+void bilateralFilter(cv::Mat frame, const int d, const int sigmaColor, const int sigmaSpace) {
+    cv::Mat dst;
+    cv::bilateralFilter(frame,dst,d,sigmaColor,sigmaSpace,cv::BORDER_DEFAULT);
+    frame = dst;
+}
+
+void nlmf(cv::Mat frame, const float h, const float hColor, const int templateWindowSize, const int searchWindowSize) {
+    cv::Mat dst;
+    cv::fastNlMeansDenoisingColored(frame,dst,h,hColor,templateWindowSize,searchWindowSize);
+    frame = dst;
+}
+
+void filter2D(cv::Mat frame) {
+    cv::Mat kernel = (cv::Mat_<int>(3,3) << 0,-1,0,-1,5,-1,0,-1,0);
+    cv::filter2D(frame, frame, -1, kernel, cv::Point(-1, -1), 0, cv::BORDER_DEFAULT);
+}
+
 void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
                    const std::string& vocab_file_path, const std::string& video_file_path, const std::string& mask_img_path,
                    const unsigned int frame_skip, const bool no_sleep, const bool auto_term,
-                   const bool eval_log, const std::string& map_db_path) {
+                   const bool eval_log, const std::string& map_db_path, const int process_option) {
     // load the mask image
     const cv::Mat mask = mask_img_path.empty() ? cv::Mat{} : cv::imread(mask_img_path, cv::IMREAD_GRAYSCALE);
 
@@ -56,6 +102,9 @@ void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
     bool is_not_end = true;
     // run the SLAM in another thread
     std::thread thread([&]() {
+        std::chrono::system_clock::time_point  start, end; // 型は auto で可
+        start = std::chrono::system_clock::now(); // 計測開始時間
+
         while (is_not_end) {
             is_not_end = video.read(frame);
 
@@ -63,6 +112,19 @@ void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
 
             if (!frame.empty() && (num_frame % frame_skip == 0)) {
                 // input the current frame and estimate the camera pose
+
+                if (process_option == 1) {
+                    gamma_correction(frame,2.0);
+                    bilateralFilter(frame,15,20,20);
+                    CLAHE(frame,2.0,7);
+                    bilateralFilter(frame,15,20,20);
+                } else if (process_option == 2) {
+                    CLAHE(frame,2.0,7);
+                    nlmf(frame,10,10,7,21);
+                } else if (process_option == 3) {
+                    filter2D(frame);
+                }
+
                 SLAM.feed_monocular_frame(frame, timestamp, mask);
             }
 
@@ -89,6 +151,10 @@ void mono_tracking(const std::shared_ptr<openvslam::config>& cfg,
                 break;
             }
         }
+
+        end = std::chrono::system_clock::now();  // 計測終了時間
+        double elapsed = std::chrono::duration_cast<std::chrono::seconds>(end-start).count(); //処理に要した時間をミリ秒に変換
+        std::cout << "elapsed time: " << elapsed << "[s]" << std::endl;
 
         // wait until the loop BA is finished
         while (SLAM.loop_BA_is_running()) {
@@ -163,6 +229,7 @@ int main(int argc, char* argv[]) {
     auto debug_mode = op.add<popl::Switch>("", "debug", "debug mode");
     auto eval_log = op.add<popl::Switch>("", "eval-log", "store trajectory and tracking times for evaluation");
     auto map_db_path = op.add<popl::Value<std::string>>("p", "map-db", "store a map database at this path after SLAM", "");
+    auto process_option = op.add<popl::Value<unsigned int>>("", "proc-opt", "process option", 0);
     try {
         op.parse(argc, argv);
     }
@@ -212,7 +279,7 @@ int main(int argc, char* argv[]) {
     if (cfg->camera_->setup_type_ == openvslam::camera::setup_type_t::Monocular) {
         mono_tracking(cfg, vocab_file_path->value(), video_file_path->value(), mask_img_path->value(),
                       frame_skip->value(), no_sleep->is_set(), auto_term->is_set(),
-                      eval_log->is_set(), map_db_path->value());
+                      eval_log->is_set(), map_db_path->value(), process_option->value());
     }
     else {
         throw std::runtime_error("Invalid setup type: " + cfg->camera_->get_setup_type_string());
